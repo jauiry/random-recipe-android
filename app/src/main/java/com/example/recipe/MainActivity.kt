@@ -4,8 +4,10 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -32,21 +34,37 @@ class MainActivity : ComponentActivity() {
     val selected = remember { mutableStateListOf<String>().apply { addAll(options) } }
     val menu = remember { mutableStateListOf<Recipe>() }
     var filter by remember { mutableStateOf(true) }
+    var message by remember { mutableStateOf<String?>(null) }
     val available = recipes.filter { !filter || it.ingredients.all(selected::contains) }
     MaterialTheme { Column(Modifier.fillMaxSize().padding(16.dp)) {
         Text("今天吃什么 🍳", style = MaterialTheme.typography.headlineMedium)
         Text("两人份 · 三菜一汤 · 离线菜谱")
         Spacer(Modifier.height(8.dp))
         Text("冰箱现有食材（点击切换）")
-        options.chunked(3).forEach { row -> Row { row.forEach { name -> FilterChip(selected = name in selected, onClick = { if (name in selected) selected.remove(name) else selected.add(name) }, label = { Text(name) }, modifier = Modifier.padding(end = 5.dp)) } } }
+        options.chunked(3).forEach { row -> Row(Modifier.horizontalScroll(rememberScrollState())) { row.forEach { name -> FilterChip(selected = name in selected, onClick = { if (name in selected) selected.remove(name) else selected.add(name) }, label = { Text(name) }, modifier = Modifier.padding(end = 5.dp)) } } }
         Row { Text("仅显示食材齐全的菜谱", modifier = Modifier.weight(1f)); Switch(checked = filter, onCheckedChange = { filter = it }) }
-        Button(onClick = { menu.clear(); menu.addAll(available.filter { it.category == "菜" }.shuffled().take(3)); menu.addAll(available.filter { it.category == "汤" }.shuffled().take(1)) }) { Text("🎲 随机生成菜单") }
+        Button(onClick = {
+            val dishes = available.filter { it.category == "菜" }
+            val soups = available.filter { it.category == "汤" }
+            if (dishes.size < 3 || soups.isEmpty()) {
+                message = "当前只有 ${dishes.size} 道菜、${soups.size} 道汤可选，需要至少 3 道菜和 1 道汤。请增加食材或关闭严格筛选。"
+            } else {
+                menu.clear()
+                menu.addAll(dishes.shuffled().take(3))
+                menu.add(soups.random())
+                message = null
+            }
+        }) { Text("🎲 随机生成菜单") }
+        message?.let { Text(it, color = MaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 8.dp)) }
         Text("今日菜单（点击候选菜谱可手动替换或加入）", style = MaterialTheme.typography.titleMedium)
         if (menu.isEmpty()) Text("还没有选菜，点击随机生成或从下方挑选")
-        menu.forEach { recipe -> Text("• ${recipe.name}") }
+        menu.forEach { recipe -> Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("• ${recipe.name}")
+            TextButton(onClick = { menu.remove(recipe) }) { Text("移除") }
+        } }
         HorizontalDivider(Modifier.padding(vertical = 8.dp))
         Text("候选菜谱 ${available.size} 道", style = MaterialTheme.typography.titleMedium)
-        LazyColumn { items(available) { recipe ->
+        LazyColumn(Modifier.weight(1f)) { items(available, key = { it.name }) { recipe ->
             var expanded by remember { mutableStateOf(false) }
             Card(Modifier.fillMaxWidth().padding(vertical = 4.dp)) { Column(Modifier.padding(12.dp)) {
                 Text("${recipe.name} · ${recipe.category}", style = MaterialTheme.typography.titleMedium)
@@ -54,7 +72,11 @@ class MainActivity : ComponentActivity() {
                 Row { TextButton(onClick = { expanded = !expanded }) { Text(if (expanded) "收起做法" else "查看做法") }; TextButton(onClick = {
                     val categoryMax = if (recipe.category == "汤") 1 else 3
                     val categoryItems = menu.filter { it.category == recipe.category }
-                    if (recipe !in menu) { if (categoryItems.size >= categoryMax) menu.remove(categoryItems.first()); menu.add(recipe) }
+                    if (recipe !in menu) {
+                        if (categoryItems.size >= categoryMax) menu.remove(categoryItems.first())
+                        menu.add(recipe)
+                        message = null
+                    }
                 }) { Text("选这道") } }
                 if (expanded) Text(recipe.steps)
             } }
